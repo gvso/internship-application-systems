@@ -3,6 +3,7 @@ package icmp
 import (
 	"errors"
 	"net"
+	"time"
 
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -47,4 +48,13 @@ func (c *PacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	}
 
 	return c.c.ReadFrom(b)
+}
+
+// SetReadDeadline sets the read deadline associated with the connection.
+func (c *PacketConn) SetReadDeadline(t time.Time) error {
+	if !c.ok() {
+		return errInvalid
+	}
+
+	return c.c.SetReadDeadline(t)
 }

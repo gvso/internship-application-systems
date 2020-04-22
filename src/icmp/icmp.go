@@ -20,6 +20,12 @@ const (
 	IPv6Type = "ip6"
 )
 
+// ICMP Types
+const (
+	ICMPTypeEchoReply   = 0
+	ICMPTypeEchoRequest = 8
+)
+
 // ListenPacket starts listening for ICMP messages.
 func ListenPacket(proto, address string) (*PacketConn, error) {
 

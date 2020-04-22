@@ -4,89 +4,65 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gvso/internship-application-systems/src/ping"
-
-	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 )
 
-var ip4addr = "0.0.0.0"
+var received = 0
+var lost = 0
 
-func ping2(addr string) (*net.IPAddr, time.Duration, error) {
-	// Start listening for icmp replies
-	c, err := icmp.ListenPacket("ip4:icmp", ip4addr)
-	if err != nil {
-		panic(err)
-	}
-	defer c.Close()
+func printStatistics() {
+	total := received + lost
 
-	// Resolve any DNS (if used) and get the real IP of the target
-	dst, err := net.ResolveIPAddr("ip4", addr)
-	if err != nil {
-		panic(err)
-		return nil, 0, err
-	}
-
-	// Make a new ICMP message
-	m := icmp.Message{
-		Type: ipv4.ICMPTypeEcho, Code: 0,
-		Body: &icmp.Echo{
-			ID:   1 & 0xffff,
-			Seq:  9 & 0xffff, //<< uint(seq), // TODO
-			Data: []byte("TEST"),
-		},
-	}
-	b, err := m.Marshal(nil)
-	if err != nil {
-		return dst, 0, err
-	}
-
-	// Send it
-	start := time.Now()
-	n, err := c.WriteTo(b, dst)
-	if err != nil {
-		return dst, 0, err
-	} else if n != len(b) {
-		return dst, 0, fmt.Errorf("got %v; want %v", n, len(b))
-	}
-
-	// Wait for a reply
-	reply := make([]byte, 1500)
-	err = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if err != nil {
-		return dst, 0, err
-	}
-	n, peer, err := c.ReadFrom(reply)
-	if err != nil {
-		return dst, 0, err
-	}
-	duration := time.Since(start)
-
-	// Pack it up boys, we're done here
-	rm, err := icmp.ParseMessage(1, reply[:n])
-	if err != nil {
-		return dst, 0, err
-	}
-	switch rm.Type {
-	case ipv4.ICMPTypeEchoReply:
-		return dst, duration, nil
-	default:
-		return dst, 0, fmt.Errorf("got %+v from %v; want echo reply", rm, peer)
-	}
+	fmt.Printf("%d packets transmitted, %d received, %.0f%% packet loss\n", total, received, float32(lost)/float32(total)*100)
 }
 
 func main() {
-	/*reader := bufio.NewReader(os.Stdin)
-	fmt.Print("> ")
-	input, _ := reader.ReadString('\n')
-	addr := strings.TrimSuffix(input, "\n")*/
-	addr := "www.facebook.com"
 
-	dest, d, err := ping.Ping(addr)
-	log.Println(dest, d)
-	if err != nil {
-		panic(err)
+	if len(os.Args) != 2 {
+		log.Fatal("Run the program using ./<binary> <host>")
 	}
+
+	// Validates the address.
+	addr := os.Args[1]
+	_, err := net.ResolveIPAddr("ip4", addr)
+	if err != nil {
+		fmt.Printf("Invalid address %s", addr)
+		os.Exit(1)
+	}
+
+	// Listens for OS signals.
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-c
+		printStatistics()
+		os.Exit(1)
+	}()
+
+	fmt.Printf("PING %s\n", addr)
+
+	for i := 0; true; i++ {
+		res, err := ping.Ping(addr, i)
+
+		if err != nil {
+			if strings.Contains(err.Error(), "socket: operation not permitted") {
+				log.Fatal("You need to run the program as sudo")
+				os.Exit(1)
+			}
+
+			lost++
+		} else {
+			fmt.Printf("Message from %s (%v): icmp_seq=%d time=%v\n", res.CName, res.Dest, res.Seq, res.Duration)
+			received++
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+
 }
